@@ -31,12 +31,12 @@ RoadVision-AI/
 ├── data/ # Dataset (ignored by git)
 ├── notebooks/ # Jupyter notebooks
 ├── src/ # Source code
-│ ├── config.py # Configuration
-│ ├── data_loader.py # Data loading
-│ └── model.py # YOLO model
+│   ├── config.py # Configuration
+│   ├── data_loader.py # Data loading
+│   └── model.py # YOLO model
 ├── models/ # Trained weights (ignored)
 ├── app/ # Streamlit application
-│ └── app.py
+│   └── app.py
 ├── utils/ # Helper functions
 ├── requirements.txt # Dependencies
 └── README.md
@@ -69,7 +69,7 @@ pip install -r requirements.txt
 4. Download dataset
 
 Download RDD2022 YOLO format from:
-https://www.kaggle.com/datasets/atreyamajumdar/rdd2022-dataset-yolo-format
+https://www.kaggle.com/datasets/sreekaraditya/rdd2022-yolo-crackscan-v2
 
 Place extracted files in data/ folder.
 
