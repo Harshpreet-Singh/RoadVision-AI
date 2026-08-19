@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pt
+*.pth
+models/
+data/
+*.zip
+*.tar.gz
+.vscode/
+.idea/
+venv/
+env/
+.DS_Store
