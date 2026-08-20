@@ -26,7 +26,7 @@ for dir_path in [DATA_DIR, MODELS_DIR, NOTEBOOKS_DIR, APP_DIR, UTILS_DIR]:
 # ============================================================================
 # RDD2022 dataset paths (YOLO format)
 
-DATASET_PATH = DATA_DIR / "rdd2022-yolo"  # Extract dataset here
+DATASET_PATH = DATA_DIR  # Dataset directly in data folder
 
 # Dataset splits
 TRAIN_IMAGES = DATASET_PATH / "train" / "images"
