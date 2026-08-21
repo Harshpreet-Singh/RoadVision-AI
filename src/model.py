@@ -10,7 +10,7 @@ from ultralytics import YOLO
 import yaml
 from datetime import datetime
 
-from config import (
+from .config import (
     YOLO_MODEL,
     DATA_YAML,
     EPOCHS,
