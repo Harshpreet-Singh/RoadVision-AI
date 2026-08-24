@@ -123,21 +123,16 @@ class RoadDamageDetector:
         return self.training_results
     
     def validate(self, model_path=None):
-        """
-        Validate the model on validation set.
-        
-        Args:
-            model_path: Path to model weights. If None, uses best model.
-        """
         model_path = model_path or BEST_MODEL_PATH
-        
         if not Path(model_path).exists():
             print(f"Model not found at {model_path}")
-            print("Please train first or provide valid path.")
             return None
         
         print(f"\nValidating model: {model_path}")
-        results = self.model.val(
+        
+        # Load model with data.yaml
+        model = YOLO(str(model_path))
+        results = model.val(
             data=str(self.data_yaml),
             batch=BATCH_SIZE,
             imgsz=IMAGE_SIZE,
@@ -145,28 +140,23 @@ class RoadDamageDetector:
             conf=CONFIDENCE_THRESHOLD,
             iou=IOU_THRESHOLD,
             plots=True,
-            save_json=True,
-            save_hybrid=True
+            save_json=True
         )
-        
         return results
     
     def predict(self, image_path, save=True):
-        """
-        Run inference on a single image or video.
-        
-        Args:
-            image_path: Path to image or video file
-            save: Save results or not
-        
-        Returns:
-            Results object with detections
-        """
         if not Path(image_path).exists():
             print(f"File not found: {image_path}")
             return None
         
-        results = self.model.predict(
+        # Load trained model
+        if BEST_MODEL_PATH.exists():
+            model = YOLO(str(BEST_MODEL_PATH))
+        else:
+            print(f"Model not found at {BEST_MODEL_PATH}")
+            return None
+        
+        results = model.predict(
             source=image_path,
             conf=CONFIDENCE_THRESHOLD,
             iou=IOU_THRESHOLD,
