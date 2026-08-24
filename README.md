@@ -88,6 +88,25 @@ python src/train.py
 python src/evaluate.py
 ```
 
+## Results
+
+- **mAP50:** 0.574
+- **mAP50-95:** 0.293
+- **Inference Speed:** 9.6ms per image
+- **Classes:** 4 (Longitudinal Crack, Transverse Crack, Alligator Crack, Pothole)
+
+## Sample Detection
+
+| Image | Detections |
+|-------|------------|
+| China_MotorBike_002004.jpg | 3 Longitudinal Cracks (71.7%, 40.3%, 29.1%) |
+
+## Running the App
+
+```bash
+streamlit run app/app.py
+
+
 ## License
 This project is licensed under the MIT License.
 
