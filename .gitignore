@@ -50,3 +50,7 @@ logs/
 
 # Streamlit
 .streamlit/secrets.toml
+
+
+# detected outputs
+runs/
