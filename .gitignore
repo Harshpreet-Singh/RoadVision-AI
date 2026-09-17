@@ -44,6 +44,9 @@ Thumbs.db
 logs/
 *.log
 
+# docs
+docs/RoadVision-AI model_training.txt
+
 # Jupyter
 .ipynb_checkpoints/
 *.ipynb
