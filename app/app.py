@@ -415,6 +415,11 @@ with tab1:
     )
     
     if uploaded_file is not None:
+        # Clear previous results if new file uploaded
+        if st.session_state.get("last_uploaded") != uploaded_file.name:
+            st.session_state["upload_result"] = None
+            st.session_state["last_uploaded"] = uploaded_file.name
+        
         image = Image.open(uploaded_file)
         if image.mode == 'RGBA':
             image = image.convert('RGB')
@@ -423,12 +428,15 @@ with tab1:
         
         col_left, col_right = st.columns(2, gap="large")
         
+        # ============================================================
+        # LEFT COLUMN: Uploaded Image + Detect Button
+        # ============================================================
         with col_left:
             st.markdown(f"""
             <div class="ui-card">
                 <div class="card-header">
                     <span>Uploaded Image</span>
-                    <span class="resolution-badge">{img_width} × {img_height}</span>
+                    <span class="resolution-badge">{img_width} x {img_height}</span>
                 </div>
                 <div class="card-body">
             """, unsafe_allow_html=True)
@@ -440,6 +448,50 @@ with tab1:
             
             detect_btn = st.button("Detect Damage", type="primary", use_container_width=True)
         
+        # ============================================================
+        # DETECTION LOGIC (runs only when button clicked)
+        # ============================================================
+        if detect_btn:
+            if model is None:
+                st.error("Model not found.")
+            else:
+                with st.spinner("Analyzing..."):
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+                        image.save(tmp.name, format='JPEG', quality=95)
+                        tmp_path = tmp.name
+                    
+                    results = model.predict(tmp_path, conf=confidence, iou=iou, save=False, verbose=False)
+                    os.unlink(tmp_path)
+                    
+                    # Store results in session state
+                    if results and len(results[0].boxes) > 0:
+                        detections = []
+                        for box in results[0].boxes:
+                            cls = int(box.cls[0])
+                            conf_val = float(box.conf[0])
+                            class_name = model.names[cls]
+                            severity = get_severity(class_name)
+                            detections.append({
+                                "class_name": class_name,
+                                "confidence": conf_val,
+                                "severity": severity,
+                            })
+                        
+                        st.session_state["upload_result"] = {
+                            "annotated": results[0].plot(),
+                            "detections": detections,
+                            "has_damage": True,
+                        }
+                    else:
+                        st.session_state["upload_result"] = {
+                            "annotated": None,
+                            "detections": [],
+                            "has_damage": False,
+                        }
+        
+        # ============================================================
+        # RIGHT COLUMN: Results (persists across reruns)
+        # ============================================================
         with col_right:
             st.markdown("""
             <div class="ui-card">
@@ -449,77 +501,10 @@ with tab1:
                 <div class="card-body">
             """, unsafe_allow_html=True)
             
-            if detect_btn:
-                if model is None:
-                    st.error("Model not found.")
-                else:
-                    with st.spinner("Analyzing..."):
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-                            image.save(tmp.name, format='JPEG', quality=95)
-                            tmp_path = tmp.name
-                        
-                        results = model.predict(tmp_path, conf=confidence, iou=iou, save=False, verbose=False)
-                        os.unlink(tmp_path)
-                        
-                        if results and len(results[0].boxes) > 0:
-                            boxes = results[0].boxes
-                            num_detections = len(boxes)
-                            
-                            st.markdown(f"""
-                            <div class="metric-card">
-                                <div style="display:flex; justify-content:space-between; align-items:center;">
-                                    <div>
-                                        <div class="metric-value">{num_detections}</div>
-                                        <div class="metric-label">Damages Detected</div>
-                                    </div>
-                                    <div style="font-size:24px; color:#b8956e; font-weight:300;">✓</div>
-                                </div>
-                            </div>
-                            """, unsafe_allow_html=True)
-                            
-                            st.markdown('<div style="width:100%; margin-bottom:8px; font-size:13px; font-weight:600; color:#6a5a4a;">Annotated Output</div>', unsafe_allow_html=True)
-                            annotated = results[0].plot()
-                            st.image(annotated, use_container_width=True)
-                            
-                            st.markdown('</div></div>', unsafe_allow_html=True)
-                            st.markdown('<div style="margin-top:16px;"></div>', unsafe_allow_html=True)
-                            
-                            with st.expander("Detection Details", expanded=True):
-                                for i, box in enumerate(boxes):
-                                    cls = int(box.cls[0])
-                                    conf = float(box.conf[0])
-                                    class_name = model.names[cls]
-                                    severity = get_severity(class_name)
-                                    badge_class = "badge-high" if severity == "High" else "badge-medium"
-                                    conf_pct = conf * 100
-                                    
-                                    st.markdown(f"""
-                                    <div class="detection-item">
-                                        <div style="display:flex; align-items:center; gap:12px; flex:1; width:100%;">
-                                            <span style="font-weight:700; font-size:13px; min-width:24px; color:#b8956e;">#{i+1}</span>
-                                            <span style="font-weight:600; font-size:14px; min-width:140px; color:#3d2c1e;">{class_name}</span>
-                                            <span class="{badge_class}">{severity}</span>
-                                            <div class="confidence-bar">
-                                                <div class="confidence-fill" style="width:{conf_pct:.0f}%;"></div>
-                                            </div>
-                                            <span style="font-weight:700; font-size:13px; min-width:48px; text-align:right; color:#3d2c1e;">{conf_pct:.1f}%</span>
-                                        </div>
-                                    </div>
-                                    """, unsafe_allow_html=True)
-                        else:
-                            st.markdown('</div>', unsafe_allow_html=True)
-                            st.markdown("""
-                            <div class="metric-card" style="border-left-color:#7a9a7a; text-align:center;">
-                                <div style="font-size:32px; margin-bottom:8px;">🛣️</div>
-                                <div class="metric-value" style="color:#7a9a7a;">0</div>
-                                <div class="metric-label">Damages Detected</div>
-                                <div style="color:#7a9a7a; font-weight:600; margin-top:12px; font-size:14px;">
-                                    No damage detected — Road looks clear
-                                </div>
-                            </div>
-                            """, unsafe_allow_html=True)
-                            st.markdown('</div>', unsafe_allow_html=True)
-            else:
+            result = st.session_state.get("upload_result")
+            
+            if result is None:
+                # No detection yet
                 st.markdown('</div>', unsafe_allow_html=True)
                 st.markdown("""
                 <div class="empty-state">
@@ -529,7 +514,105 @@ with tab1:
                 </div>
                 """, unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
+            
+            elif result["has_damage"]:
+                # Damages detected
+                num_detections = len(result["detections"])
+                
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <div>
+                            <div class="metric-value">{num_detections}</div>
+                            <div class="metric-label">Damages Detected</div>
+                        </div>
+                        <div style="font-size:24px; color:#b8956e; font-weight:300;">✓</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                st.markdown('<div style="width:100%; margin-bottom:8px; font-size:13px; font-weight:600; color:#6a5a4a;">Annotated Output</div>', unsafe_allow_html=True)
+                st.image(result["annotated"], use_container_width=True)
+                
+                st.markdown('</div></div>', unsafe_allow_html=True)
+                st.markdown('<div style="margin-top:16px;"></div>', unsafe_allow_html=True)
+                
+                with st.expander("Detection Details", expanded=True):
+                    for i, d in enumerate(result["detections"]):
+                        badge_class = "badge-high" if d["severity"] == "High" else "badge-medium"
+                        conf_pct = d["confidence"] * 100
+                        
+                        st.markdown(f"""
+                        <div class="detection-item">
+                            <div style="display:flex; align-items:center; gap:12px; flex:1; width:100%;">
+                                <span style="font-weight:700; font-size:13px; min-width:24px; color:#b8956e;">#{i+1}</span>
+                                <span style="font-weight:600; font-size:14px; min-width:140px; color:#3d2c1e;">{d['class_name']}</span>
+                                <span class="{badge_class}">{d['severity']}</span>
+                                <div class="confidence-bar">
+                                    <div class="confidence-fill" style="width:{conf_pct:.0f}%;"></div>
+                                </div>
+                                <span style="font-weight:700; font-size:13px; min-width:48px; text-align:right; color:#3d2c1e;">{conf_pct:.1f}%</span>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                
+                # ============================================================
+                # SAVE TO DATABASE SECTION
+                # ============================================================
+                st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
+                
+                st.markdown("""
+                <div style="background:#faf5ef; border-radius:8px; padding:14px; border:1px solid #e8ddd0; margin-bottom:12px;">
+                    <div style="font-size:13px; font-weight:600; color:#3d2c1e; margin-bottom:4px;">
+                        Save to Database
+                    </div>
+                    <div style="font-size:12px; color:#9a8776;">
+                        Optional: Add location before saving
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                col_save_lat, col_save_lon = st.columns(2)
+                with col_save_lat:
+                    save_lat = st.number_input("Latitude", value=0.0, format="%.6f", step=0.0001, key="upload_lat")
+                with col_save_lon:
+                    save_lon = st.number_input("Longitude", value=0.0, format="%.6f", step=0.0001, key="upload_lon")
+                
+                if st.button("Save All Detections to Database", type="primary", use_container_width=True, key="save_upload_btn"):
+                    with st.spinner("Saving to database..."):
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+                            image.save(tmp.name, format='JPEG', quality=95)
+                            tmp_path = tmp.name
+                        
+                        saved_count = 0
+                        for d in result["detections"]:
+                            if save_detection_to_db(tmp_path, d["class_name"], d["confidence"], d["severity"], save_lat, save_lon, device_id="upload"):
+                                saved_count += 1
+                        
+                        os.unlink(tmp_path)
+                        
+                        if saved_count > 0:
+                            st.success(f"✅ {saved_count} detection(s) saved to database!")
+                        else:
+                            st.error("Failed to save to database")
+            
+            else:
+                # No damage detected
+                st.markdown('</div>', unsafe_allow_html=True)
+                st.markdown("""
+                <div class="metric-card" style="border-left-color:#7a9a7a; text-align:center;">
+                    <div style="font-size:32px; margin-bottom:8px;">🛣️</div>
+                    <div class="metric-value" style="color:#7a9a7a;">0</div>
+                    <div class="metric-label">Damages Detected</div>
+                    <div style="color:#7a9a7a; font-weight:600; margin-top:12px; font-size:14px;">
+                        No damage detected — Road looks clear
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+    
     else:
+        # No file uploaded
         st.markdown("""
         <div class="empty-state" style="min-height:400px; background:#ffffff; border:2px dashed #e8ddd0;">
             <div class="icon">📤</div>
@@ -881,7 +964,7 @@ with tab4:
                         mime="application/pdf",
                         use_container_width=True
                     )
-                    
+
 # ============================================================================
 # FOOTER
 # ============================================================================
