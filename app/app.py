@@ -618,85 +618,270 @@ with tab2:
 # TAB 3: DASHBOARD
 # ============================================================================
 with tab3:
-    total, high, medium = get_stats()
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown(f"""
-        <div class="metric-card" style="border-left-color:#b8956e;">
-            <div class="metric-label">Total Detections</div>
-            <div class="metric-value">{total}</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with col2:
-        st.markdown(f"""
-        <div class="metric-card" style="border-left-color:#a65a4a;">
-            <div class="metric-label">High Priority</div>
-            <div class="metric-value">{high}</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with col3:
-        st.markdown(f"""
-        <div class="metric-card" style="border-left-color:#9a7a4a;">
-            <div class="metric-label">Medium Priority</div>
-            <div class="metric-value">{medium}</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
     st.markdown("""
-    <div style="background:#ffffff; border-radius:12px; border:1px solid #e8ddd0; padding:20px; margin-top:12px;">
-        <div style="font-size:14px; font-weight:600; color:#3d2c1e; margin-bottom:12px;">
-            Recent Detections
-        </div>
+    <div style="font-size:18px; font-weight:700; color:#3d2c1e; margin-bottom:16px;">
+        Detection Dashboard
+    </div>
     """, unsafe_allow_html=True)
     
-    rows = get_all_reports(limit=20)
-    if rows:
-        for row in rows:
-            st.markdown(f"""
-            <div style="background:#faf5ef; padding:10px 14px; border-radius:8px; margin-bottom:6px; border-left:4px solid #b8956e; display:flex; justify-content:space-between; align-items:center;">
-                <div>
-                    <strong>{row[1]}</strong> 
-                    <span style="font-size:12px; color:#9a8776;">| {row[3]}</span>
-                    <span style="font-size:12px; color:#9a8776; margin-left:8px;">Conf: {row[2]:.1%}</span>
-                </div>
-                <div style="font-size:11px; color:#b8a898;">
-                    📍 {row[4]:.6f}, {row[5]:.6f} 
-                    🕐 {row[6].strftime('%d %b %H:%M') if row[6] else 'N/A'}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-    else:
+    # Fetch all data
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, class_name, confidence, severity, latitude, longitude, timestamp, device_id
+            FROM damage_reports
+            ORDER BY timestamp DESC
+        """)
+        all_rows = cur.fetchall()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        st.error(f"Database error: {e}")
+        all_rows = []
+    
+    if not all_rows:
         st.markdown("""
-        <div style="color:#9a8776; font-size:14px; text-align:center; padding:20px;">
-            No detections in database yet. Capture images from Phone Camera tab.
+        <div class="empty-state" style="min-height:300px;">
+            <div class="icon">📊</div>
+            <div class="title">No data in database</div>
+            <div class="sub">Run a detection first to see data here</div>
         </div>
         """, unsafe_allow_html=True)
-    
-    st.markdown('</div>', unsafe_allow_html=True)
+    else:
+        # Summary Stats
+        total = len(all_rows)
+        high_count = sum(1 for r in all_rows if r[3] == "High")
+        medium_count = sum(1 for r in all_rows if r[3] == "Medium")
+        unique_classes = len(set(r[1] for r in all_rows))
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.markdown(f"""
+            <div class="metric-card" style="border-left-color:#b8956e;">
+                <div class="metric-label">Total</div>
+                <div class="metric-value">{total}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with col2:
+            st.markdown(f"""
+            <div class="metric-card" style="border-left-color:#a65a4a;">
+                <div class="metric-label">High Priority</div>
+                <div class="metric-value">{high_count}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with col3:
+            st.markdown(f"""
+            <div class="metric-card" style="border-left-color:#9a7a4a;">
+                <div class="metric-label">Medium Priority</div>
+                <div class="metric-value">{medium_count}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with col4:
+            st.markdown(f"""
+            <div class="metric-card" style="border-left-color:#7a9a7a;">
+                <div class="metric-label">Damage Types</div>
+                <div class="metric-value">{unique_classes}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown("<div style='height:20px;'></div>", unsafe_allow_html=True)
+        
+        # Filters
+        st.markdown('<div style="font-size:14px; font-weight:600; color:#3d2c1e; margin-bottom:12px;">Filters</div>', unsafe_allow_html=True)
+        
+        col_f1, col_f2, col_f3 = st.columns(3)
+        with col_f1:
+            severity_filter = st.multiselect("Severity", ["High", "Medium"], default=["High", "Medium"])
+        with col_f2:
+            class_options = sorted(set(r[1] for r in all_rows))
+            class_filter = st.multiselect("Damage Class", class_options, default=class_options)
+        with col_f3:
+            device_options = sorted(set(r[7] for r in all_rows if r[7]))
+            device_filter = st.multiselect("Device", device_options, default=device_options)
+        
+        # Apply filters
+        filtered_rows = [
+            r for r in all_rows
+            if r[3] in severity_filter and r[1] in class_filter and r[7] in device_filter
+        ]
+        
+        st.markdown("<div style='height:20px;'></div>", unsafe_allow_html=True)
+        
+        # Data Table with Checkboxes
+        st.markdown(f'<div style="font-size:14px; font-weight:600; color:#3d2c1e; margin-bottom:12px;">Detections ({len(filtered_rows)} of {total})</div>', unsafe_allow_html=True)
+        
+        table_data = []
+        for r in filtered_rows:
+            table_data.append({
+                "Select": False,
+                "ID": r[0],
+                "Class": r[1],
+                "Confidence": f"{r[2]:.1%}",
+                "Severity": r[3],
+                "Location": f"{r[4]:.4f}, {r[5]:.4f}" if r[4] != 0 else "N/A",
+                "Timestamp": r[6].strftime("%d %b %Y, %H:%M") if r[6] else "N/A",
+                "Device": r[7] or "unknown"
+            })
+        
+        edited_df = st.data_editor(
+            table_data,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Select": st.column_config.CheckboxColumn("Select", default=False),
+                "ID": st.column_config.NumberColumn("ID", width="small"),
+                "Class": st.column_config.TextColumn("Class", width="medium"),
+                "Confidence": st.column_config.TextColumn("Confidence", width="small"),
+                "Severity": st.column_config.TextColumn("Severity", width="small"),
+                "Location": st.column_config.TextColumn("Location", width="medium"),
+                "Timestamp": st.column_config.TextColumn("Timestamp", width="medium"),
+                "Device": st.column_config.TextColumn("Device", width="small"),
+            },
+            key="dashboard_table"
+        )
+        
+        # Store selected in session state
+        import pandas as pd
+        edited_df = pd.DataFrame(edited_df)
+        selected_ids = edited_df[edited_df["Select"] == True]["ID"].tolist()
+        st.session_state["selected_ids"] = selected_ids
+        st.session_state["selected_ids"] = selected_ids
+        
+        st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
+        
+        # Generate Report Button
+        col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 1])
+        with col_btn2:
+            if st.button(f"Generate Report ({len(selected_ids)} selected)", type="primary", use_container_width=True, disabled=len(selected_ids) == 0):
+                st.session_state["go_to_report"] = True
+                st.success(f"✅ {len(selected_ids)} rows selected. Go to Reports tab.")
+        
+        st.markdown("<div style='height:24px;'></div>", unsafe_allow_html=True)
+        
+        # Charts
+        st.markdown('<div style="font-size:14px; font-weight:600; color:#3d2c1e; margin-bottom:12px;">Analytics</div>', unsafe_allow_html=True)
+        
+        col_chart1, col_chart2 = st.columns(2)
+        
+        with col_chart1:
+            class_counts = {}
+            for r in filtered_rows:
+                class_counts[r[1]] = class_counts.get(r[1], 0) + 1
+            if class_counts:
+                import pandas as pd
+                chart_data = pd.DataFrame({"Class": list(class_counts.keys()), "Count": list(class_counts.values())})
+                st.markdown('<div style="font-size:13px; font-weight:600; color:#3d2c1e; margin-bottom:8px;">Class Distribution</div>', unsafe_allow_html=True)
+                st.bar_chart(chart_data.set_index("Class"), color="#b8956e", height=250)
+        
+        with col_chart2:
+            severity_counts = {}
+            for r in filtered_rows:
+                severity_counts[r[3]] = severity_counts.get(r[3], 0) + 1
+            if severity_counts:
+                import pandas as pd
+                sev_data = pd.DataFrame({"Severity": list(severity_counts.keys()), "Count": list(severity_counts.values())})
+                st.markdown('<div style="font-size:13px; font-weight:600; color:#3d2c1e; margin-bottom:8px;">Severity Distribution</div>', unsafe_allow_html=True)
+                st.bar_chart(sev_data.set_index("Severity"), color="#a65a4a", height=250)
+
 
 # ============================================================================
 # TAB 4: REPORTS
 # ============================================================================
 with tab4:
     st.markdown("""
-    <div style="background:#faf5ef; border-radius:10px; padding:20px; border:1px solid #e8ddd0; margin-bottom:16px;">
-        <div style="font-size:14px; color:#6a5a4a; font-weight:500;">
-            📄 Report generation coming soon. Export PDF with all detections from database.
-        </div>
+    <div style="font-size:18px; font-weight:700; color:#3d2c1e; margin-bottom:16px;">
+        Reports
     </div>
     """, unsafe_allow_html=True)
     
-    rows = get_all_reports(limit=50)
-    if rows:
-        st.download_button(
-            "Download CSV Report",
-            data="\n".join([",".join([str(row[0]), row[1], str(row[2]), row[3], str(row[4]), str(row[5]), str(row[6])]) for row in rows]),
-            file_name="damage_report.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
-
+    selected_ids = st.session_state.get("selected_ids", [])
+    
+    if not selected_ids:
+        st.markdown("""
+        <div class="empty-state" style="min-height:250px;">
+            <div class="icon">📄</div>
+            <div class="title">No rows selected</div>
+            <div class="sub">Go to Dashboard tab, select rows, then come back here</div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown(f"""
+        <div style="background:#faf5ef; border-radius:10px; padding:16px; border:1px solid #e8ddd0; margin-bottom:16px;">
+            <div style="font-size:14px; color:#3d2c1e; font-weight:600;">
+                {len(selected_ids)} detection(s) selected for report
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Fetch selected rows from DB
+        try:
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT id, class_name, confidence, severity, latitude, longitude, timestamp, device_id
+                FROM damage_reports
+                WHERE id = ANY(%s)
+                ORDER BY timestamp DESC
+            """, (selected_ids,))
+            selected_rows = cur.fetchall()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            st.error(f"Database error: {e}")
+            selected_rows = []
+        
+        if selected_rows:
+            # Preview table
+            st.markdown('<div style="font-size:14px; font-weight:600; color:#3d2c1e; margin-bottom:8px;">Selected Detections</div>', unsafe_allow_html=True)
+            
+            preview_data = []
+            for r in selected_rows:
+                preview_data.append({
+                    "ID": r[0],
+                    "Class": r[1],
+                    "Confidence": f"{r[2]:.1%}",
+                    "Severity": r[3],
+                    "Location": f"{r[4]:.4f}, {r[5]:.4f}" if r[4] != 0 else "N/A",
+                    "Timestamp": r[6].strftime("%d %b %Y, %H:%M") if r[6] else "N/A",
+                })
+            st.dataframe(preview_data, use_container_width=True, hide_index=True)
+            
+            st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
+            
+            # Download buttons
+            col_d1, col_d2 = st.columns(2)
+            
+            with col_d1:
+                # CSV
+                csv_data = "ID,Class,Confidence,Severity,Latitude,Longitude,Timestamp,Device\n"
+                for r in selected_rows:
+                    csv_data += f"{r[0]},{r[1]},{r[2]:.4f},{r[3]},{r[4]},{r[5]},{r[6]},{r[7]}\n"
+                
+                st.download_button(
+                    "Download CSV",
+                    data=csv_data,
+                    file_name=f"roadvision_report_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+            
+            with col_d2:
+                # PDF
+                from reports.generator import generate_report
+                
+                if st.button("Generate PDF Report", type="primary", use_container_width=True):
+                    with st.spinner("Generating PDF..."):
+                        pdf_buffer = generate_report(selected_rows, output_path=None)
+                    
+                    st.download_button(
+                        "Download PDF",
+                        data=pdf_buffer,
+                        file_name=f"roadvision_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+                        mime="application/pdf",
+                        use_container_width=True
+                    )
+                    
 # ============================================================================
 # FOOTER
 # ============================================================================
