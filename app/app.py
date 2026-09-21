@@ -402,7 +402,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-tab1, tab2, tab3, tab4 = st.tabs(["Upload Image", "Phone Camera", "Dashboard", "Reports"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["Upload Image", "Phone Camera", "Dashboard", "Reports", "Map View"])
 
 # ============================================================================
 # TAB 1: UPLOAD IMAGE
@@ -964,6 +964,179 @@ with tab4:
                         mime="application/pdf",
                         use_container_width=True
                     )
+# ============================================================================
+# TAB 5: MAP VIEW
+# ============================================================================
+with tab5:
+    import folium
+    from streamlit_folium import st_folium
+    
+    st.markdown("""
+    <div style="font-size:18px; font-weight:700; color:#3d2c1e; margin-bottom:16px;">
+        Detection Map
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Fetch data with valid locations
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, class_name, confidence, severity, latitude, longitude, timestamp, device_id
+            FROM damage_reports
+            WHERE latitude != 0 AND longitude != 0
+            ORDER BY timestamp DESC
+        """)
+        map_rows = cur.fetchall()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        st.error(f"Database error: {e}")
+        map_rows = []
+    
+    if not map_rows:
+        st.markdown("""
+        <div class="empty-state" style="min-height:300px;">
+            <div class="icon">🗺️</div>
+            <div class="title">No location data available</div>
+            <div class="sub">Detections with valid location will appear here</div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        # Summary
+        total_points = len(map_rows)
+        high_points = sum(1 for r in map_rows if r[3] == "High")
+        medium_points = sum(1 for r in map_rows if r[3] == "Medium")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown(f"""
+            <div class="metric-card" style="border-left-color:#b8956e;">
+                <div class="metric-label">Mapped Detections</div>
+                <div class="metric-value">{total_points}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with col2:
+            st.markdown(f"""
+            <div class="metric-card" style="border-left-color:#a65a4a;">
+                <div class="metric-label">High Priority</div>
+                <div class="metric-value">{high_points}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with col3:
+            st.markdown(f"""
+            <div class="metric-card" style="border-left-color:#9a7a4a;">
+                <div class="metric-label">Medium Priority</div>
+                <div class="metric-value">{medium_points}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
+        
+        # Filter
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            map_severity = st.multiselect(
+                "Filter by Severity",
+                ["High", "Medium"],
+                default=["High", "Medium"],
+                key="map_severity_filter"
+            )
+        with col_f2:
+            map_class_options = sorted(set(r[1] for r in map_rows))
+            map_class = st.multiselect(
+                "Filter by Class",
+                map_class_options,
+                default=map_class_options,
+                key="map_class_filter"
+            )
+        
+        # Apply filters
+        filtered_map_rows = [
+            r for r in map_rows
+            if r[3] in map_severity and r[1] in map_class
+        ]
+        
+        if not filtered_map_rows:
+            st.warning("No detections match the selected filters.")
+        else:
+            # Calculate map center
+            avg_lat = sum(r[4] for r in filtered_map_rows) / len(filtered_map_rows)
+            avg_lon = sum(r[5] for r in filtered_map_rows) / len(filtered_map_rows)
+            
+            # Create map
+            m = folium.Map(
+                location=[avg_lat, avg_lon],
+                zoom_start=13,
+                tiles="OpenStreetMap"
+            )
+            
+            # Add markers
+            for r in filtered_map_rows:
+                id_, cls, conf, sev, lat, lon, ts, dev = r
+                
+                # Color based on severity
+                color = "red" if sev == "High" else "orange"
+                
+                # Popup content
+                popup_html = f"""
+                <div style="font-family: 'Inter', sans-serif; font-size: 13px; width: 220px;">
+                    <div style="font-weight: 700; color: #3d2c1e; font-size: 14px; margin-bottom: 6px;">
+                        {cls}
+                    </div>
+                    <div style="color: #6a5a4a; line-height: 1.6;">
+                        <b>Severity:</b> <span style="color: {color};">{sev}</span><br>
+                        <b>Confidence:</b> {conf:.1%}<br>
+                        <b>Device:</b> {dev or 'N/A'}<br>
+                        <b>Time:</b> {ts.strftime('%d %b %Y, %H:%M') if ts else 'N/A'}<br>
+                        <b>Coords:</b> {lat:.4f}, {lon:.4f}
+                    </div>
+                </div>
+                """
+                
+                folium.Marker(
+                    location=[lat, lon],
+                    popup=folium.Popup(popup_html, max_width=250),
+                    tooltip=f"{cls} ({sev})",
+                    icon=folium.Icon(color=color, icon="info-sign")
+                ).add_to(m)
+            
+            # Add circle markers for clustering visual
+            for r in filtered_map_rows:
+                id_, cls, conf, sev, lat, lon, ts, dev = r
+                color = "#a65a4a" if sev == "High" else "#9a7a4a"
+                
+                folium.CircleMarker(
+                    location=[lat, lon],
+                    radius=6,
+                    color=color,
+                    fill=True,
+                    fillColor=color,
+                    fillOpacity=0.5,
+                    weight=1,
+                ).add_to(m)
+            
+            # Render map
+            st_folium(m, width=None, height=550, use_container_width=True)
+            
+            # Legend
+            st.markdown("""
+            <div style="background:#ffffff; border-radius:10px; border:1px solid #e8ddd0; padding:14px; margin-top:12px;">
+                <div style="font-size:13px; font-weight:600; color:#3d2c1e; margin-bottom:8px;">
+                    Legend
+                </div>
+                <div style="display:flex; gap:24px; font-size:13px; color:#3d2c1e;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:#a65a4a;"></span>
+                        High Priority
+                    </div>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:#9a7a4a;"></span>
+                        Medium Priority
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
 
 # ============================================================================
 # FOOTER
