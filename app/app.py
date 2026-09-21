@@ -5,13 +5,26 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import streamlit as st
 import cv2
 import numpy as np
+import pandas as pd
+
 from PIL import Image
+
 import tempfile
 from pathlib import Path
+
 from ultralytics import YOLO
+
 import psycopg2
+
 from datetime import datetime
 import time
+
+# for using map
+import folium
+from streamlit_folium import st_folium
+
+# auto fetch location instead of manual input of coordinates
+from streamlit_geolocation import streamlit_geolocation
 
 # ============================================================================
 # PAGE CONFIG
@@ -626,49 +639,141 @@ with tab1:
 # ============================================================================
 # TAB 2: WEBCAM CAPTURE (OpenCV)
 # ============================================================================
+# ============================================================================
+# TAB 2: PHONE CAMERA
+# ============================================================================
 with tab2:
     st.markdown("""
-    <div style="font-size:15px; font-weight:600; color:#3d2c1e; margin-bottom:12px;">
+    <div style="font-size:18px; font-weight:700; color:#3d2c1e; margin-bottom:16px;">
         Capture from Webcam
     </div>
     """, unsafe_allow_html=True)
     
-    # Location Input
+    # ============================================================
+    # LOCATION INPUT
+    # ============================================================
     st.markdown("""
     <div style="background:#faf5ef; border-radius:10px; padding:16px; border:1px solid #e8ddd0; margin-bottom:16px;">
-        <div style="font-size:13px; color:#9a8776; font-weight:500;">
-            📍 Location Input
+        <div style="font-size:13px; color:#9a8776; font-weight:500; margin-bottom:4px;">
+            Location Input
+        </div>
+        <div style="font-size:12px; color:#b8a898;">
+            Auto-detect from browser GPS or enter manually
         </div>
     </div>
     """, unsafe_allow_html=True)
     
+    # --- Auto GPS ---
+    st.markdown('<div style="font-size:13px; font-weight:600; color:#3d2c1e; margin-bottom:6px;">Auto-Detect Location</div>', unsafe_allow_html=True)
+    
+    location = streamlit_geolocation()
+    
+    auto_lat = None
+    auto_lon = None
+    
+    if location and location.get('latitude') and location.get('longitude'):
+        auto_lat = location['latitude']
+        auto_lon = location['longitude']
+        st.success(f"📍 Location detected: {auto_lat:.6f}, {auto_lon:.6f}")
+    else:
+        st.info("Click the location icon to allow GPS access. Or enter manually below.")
+    
+    # --- Manual Input ---
+    st.markdown('<div style="font-size:13px; font-weight:600; color:#3d2c1e; margin:12px 0 6px 0;">Or Enter Manually</div>', unsafe_allow_html=True)
+    
     col_lat, col_lon = st.columns(2)
     with col_lat:
-        lat = st.number_input("Latitude", value=0.0, format="%.6f", step=0.0001)
+        manual_lat = st.number_input("Latitude", value=0.0, format="%.6f", step=0.0001, key="manual_lat")
     with col_lon:
-        lon = st.number_input("Longitude", value=0.0, format="%.6f", step=0.0001)
+        manual_lon = st.number_input("Longitude", value=0.0, format="%.6f", step=0.0001, key="manual_lon")
     
-    # Webcam Selection
-    st.markdown('<div style="font-size:13px; font-weight:600; color:#3d2c1e; margin-bottom:4px;">Select Webcam</div>', unsafe_allow_html=True)
-    camera_index = st.selectbox("", [0, 1, 2, 3], format_func=lambda x: f"Camera {x}", label_visibility="collapsed")
+    # Final location (auto > manual)
+    if auto_lat and auto_lon:
+        lat = auto_lat
+        lon = auto_lon
+    else:
+        lat = manual_lat
+        lon = manual_lon
     
-    # Capture button
-    if st.button("📸 Capture from Webcam", type="primary"):
-        cap = cv2.VideoCapture(camera_index)
-        if not cap.isOpened():
-            st.error(f"Camera {camera_index} not available. Try another index.")
-        else:
-            ret, frame = cap.read()
-            cap.release()
+    st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
+    
+    # ============================================================
+    # WEBCAM SELECTION + CAPTURE
+    # ============================================================
+    st.markdown("""
+    <style>
+    /* Make camera preview smaller */
+    [data-testid="stCameraInput"] {
+        max-width: 50% !important;
+    }
+
+    [data-testid="stCameraInput"] video {
+        max-height: 70% !important;
+        object-fit: contain !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown(
+        '<div style="font-size:13px; font-weight:600; color:#3d2c1e; margin-bottom:4px;">Select Webcam</div>',
+        unsafe_allow_html=True
+    )
+
+    camera_index = st.selectbox(
+        "",
+        [0, 1, 2, 3],
+        format_func=lambda x: f"Camera {x}",
+        label_visibility="collapsed",
+        key="phone_cam_select"
+    )
+
+    picture = st.camera_input(
+        "Take Photo",
+        key=f"phone_cam_{camera_index}"
+    )
+    
+    # ============================================================
+    # DETECTION LOGIC (runs when picture captured)
+    # ============================================================
+    if picture is not None:
+        # Clear previous result if new picture captured
+        if st.session_state.get("last_phone_picture") != picture.name:
+            st.session_state["phone_result"] = None
+            st.session_state["last_phone_picture"] = picture.name
+        
+        img = Image.open(picture)
+        if img.mode == 'RGBA':
+            img = img.convert('RGB')
+        
+        col_left, col_right = st.columns(2, gap="large")
+        
+        # ============================================================
+        # LEFT: Captured Image
+        # ============================================================
+        with col_left:
+            st.markdown(f"""
+            <div class="ui-card">
+                <div class="card-header">
+                    <span>Captured Image</span>
+                    <span class="resolution-badge">{img.size[0]} × {img.size[1]}</span>
+                </div>
+                <div class="card-body">
+            """, unsafe_allow_html=True)
             
-            if ret:
-                # Convert BGR to RGB
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                img = Image.fromarray(frame_rgb)
-                
-                st.image(img, caption=f"Captured from Camera {camera_index}", use_container_width=True)
-                
-                # Save and process
+            st.image(img, use_container_width=True)
+            
+            st.markdown("</div></div>", unsafe_allow_html=True)
+            st.markdown("<div style='margin-top:16px;'></div>", unsafe_allow_html=True)
+            
+            analyze_btn = st.button("Analyze & Save", type="primary", use_container_width=True, key="phone_analyze_btn")
+        
+        # ============================================================
+        # DETECTION LOGIC
+        # ============================================================
+        if analyze_btn:
+            if model is None:
+                st.error("Model not found.")
+            else:
                 with st.spinner("Analyzing and saving..."):
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
                         img.save(tmp.name, format='JPEG', quality=95)
@@ -677,25 +782,128 @@ with tab2:
                     results = model.predict(tmp_path, conf=confidence, iou=iou, save=False, verbose=False)
                     
                     if results and len(results[0].boxes) > 0:
+                        detections = []
+                        saved_count = 0
+                        
                         for box in results[0].boxes:
                             cls = int(box.cls[0])
                             conf_val = float(box.conf[0])
                             class_name = model.names[cls]
                             severity = get_severity(class_name)
                             
-                            saved = save_detection_to_db(
-                                tmp_path, class_name, conf_val, severity, lat, lon, device_id="webcam"
-                            )
+                            detections.append({
+                                "class_name": class_name,
+                                "confidence": conf_val,
+                                "severity": severity,
+                            })
+                            
+                            # Save to DB
+                            if save_detection_to_db(tmp_path, class_name, conf_val, severity, lat, lon, device_id="webcam"):
+                                saved_count += 1
                         
-                        if saved:
-                            st.success(f"✅ {len(results[0].boxes)} damage(s) saved to database!")
-                            st.image(results[0].plot(), caption="Detection Results", use_container_width=True)
+                        st.session_state["phone_result"] = {
+                            "annotated": results[0].plot(),
+                            "detections": detections,
+                            "saved_count": saved_count,
+                            "location": (lat, lon),
+                            "has_damage": True,
+                        }
                     else:
-                        st.info("No damage detected. Nothing saved to database.")
+                        st.session_state["phone_result"] = {
+                            "annotated": None,
+                            "detections": [],
+                            "saved_count": 0,
+                            "location": (lat, lon),
+                            "has_damage": False,
+                        }
                     
                     os.unlink(tmp_path)
+        
+        # ============================================================
+        # RIGHT: Detection Results (persists across reruns)
+        # ============================================================
+        with col_right:
+            st.markdown("""
+            <div class="ui-card">
+                <div class="card-header">
+                    <span>Detection Results</span>
+                </div>
+                <div class="card-body">
+            """, unsafe_allow_html=True)
+            
+            result = st.session_state.get("phone_result")
+            
+            if result is None:
+                st.markdown('</div>', unsafe_allow_html=True)
+                st.markdown("""
+                <div class="empty-state">
+                    <div class="icon">📷</div>
+                    <div class="title">Ready to Analyze</div>
+                    <div class="sub">Click "Analyze & Save" to detect and store to database</div>
+                </div>
+                """, unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+            
+            elif result["has_damage"]:
+                num_detections = len(result["detections"])
+                saved_count = result["saved_count"]
+                saved_lat, saved_lon = result["location"]
+                
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <div>
+                            <div class="metric-value">{num_detections}</div>
+                            <div class="metric-label">Damages Detected</div>
+                        </div>
+                        <div style="font-size:24px; color:#b8956e; font-weight:300;">✓</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                if saved_count > 0:
+                    st.success(f"✅ {saved_count} detection(s) saved to database")
+                    if saved_lat and saved_lon:
+                        st.info(f"📍 Location: {saved_lat:.6f}, {saved_lon:.6f}")
+                
+                st.markdown('<div style="width:100%; margin-bottom:8px; font-size:13px; font-weight:600; color:#6a5a4a;">Annotated Output</div>', unsafe_allow_html=True)
+                st.image(result["annotated"], use_container_width=True)
+                
+                st.markdown('</div></div>', unsafe_allow_html=True)
+                st.markdown('<div style="margin-top:16px;"></div>', unsafe_allow_html=True)
+                
+                with st.expander("Detection Details", expanded=True):
+                    for i, d in enumerate(result["detections"]):
+                        badge_class = "badge-high" if d["severity"] == "High" else "badge-medium"
+                        conf_pct = d["confidence"] * 100
+                        
+                        st.markdown(f"""
+                        <div class="detection-item">
+                            <div style="display:flex; align-items:center; gap:12px; flex:1; width:100%;">
+                                <span style="font-weight:700; font-size:13px; min-width:24px; color:#b8956e;">#{i+1}</span>
+                                <span style="font-weight:600; font-size:14px; min-width:140px; color:#3d2c1e;">{d['class_name']}</span>
+                                <span class="{badge_class}">{d['severity']}</span>
+                                <div class="confidence-bar">
+                                    <div class="confidence-fill" style="width:{conf_pct:.0f}%;"></div>
+                                </div>
+                                <span style="font-weight:700; font-size:13px; min-width:48px; text-align:right; color:#3d2c1e;">{conf_pct:.1f}%</span>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+            
             else:
-                st.error(f"Failed to capture from Camera {camera_index}")
+                st.markdown('</div>', unsafe_allow_html=True)
+                st.markdown("""
+                <div class="metric-card" style="border-left-color:#7a9a7a; text-align:center;">
+                    <div style="font-size:32px; margin-bottom:8px;">🛣️</div>
+                    <div class="metric-value" style="color:#7a9a7a;">0</div>
+                    <div class="metric-label">Damages Detected</div>
+                    <div style="color:#7a9a7a; font-weight:600; margin-top:12px; font-size:14px;">
+                        No damage detected — Road looks clear
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
 
 # ============================================================================
 # TAB 3: DASHBOARD
@@ -825,7 +1033,7 @@ with tab3:
         )
         
         # Store selected in session state
-        import pandas as pd
+        
         edited_df = pd.DataFrame(edited_df)
         selected_ids = edited_df[edited_df["Select"] == True]["ID"].tolist()
         st.session_state["selected_ids"] = selected_ids
@@ -852,7 +1060,6 @@ with tab3:
             for r in filtered_rows:
                 class_counts[r[1]] = class_counts.get(r[1], 0) + 1
             if class_counts:
-                import pandas as pd
                 chart_data = pd.DataFrame({"Class": list(class_counts.keys()), "Count": list(class_counts.values())})
                 st.markdown('<div style="font-size:13px; font-weight:600; color:#3d2c1e; margin-bottom:8px;">Class Distribution</div>', unsafe_allow_html=True)
                 st.bar_chart(chart_data.set_index("Class"), color="#b8956e", height=250)
@@ -862,7 +1069,6 @@ with tab3:
             for r in filtered_rows:
                 severity_counts[r[3]] = severity_counts.get(r[3], 0) + 1
             if severity_counts:
-                import pandas as pd
                 sev_data = pd.DataFrame({"Severity": list(severity_counts.keys()), "Count": list(severity_counts.values())})
                 st.markdown('<div style="font-size:13px; font-weight:600; color:#3d2c1e; margin-bottom:8px;">Severity Distribution</div>', unsafe_allow_html=True)
                 st.bar_chart(sev_data.set_index("Severity"), color="#a65a4a", height=250)
@@ -968,8 +1174,7 @@ with tab4:
 # TAB 5: MAP VIEW
 # ============================================================================
 with tab5:
-    import folium
-    from streamlit_folium import st_folium
+
     
     st.markdown("""
     <div style="font-size:18px; font-weight:700; color:#3d2c1e; margin-bottom:16px;">
