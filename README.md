@@ -18,6 +18,7 @@ RoadVision AI is an end-to-end system that detects road damage (potholes, cracks
 - PDF report generation with charts and tables
 - CSV export for selected detections
 - Warm, professional UI with responsive layout
+- Interactive map view with severity-based markers
 
 ## Tech Stack
 
@@ -215,9 +216,10 @@ http://<your-ip>:8501
 | Tab | Purpose |
 |-----|---------|
 | **Upload Image** | Upload and detect damages from image files |
-| **Phone Camera** | Capture from webcam/phone with location input |
+| **Phone Camera** | Capture from webcam/phone with GPS location |
 | **Dashboard** | View all detections with filters, charts, and checkboxes |
 | **Reports** | Generate PDF/CSV from selected detections |
+| **Map View** | View all geolocated detections on an interactive map |
 
 ## Report Generation
 
@@ -243,11 +245,3 @@ This project is licensed under the MIT License.
 ## Author
 
 **Harshpreet Singh**
-
-## Commit
-
-```bash
-git add README.md
-git commit -m "Update README with complete project documentation"
-git push
-```
